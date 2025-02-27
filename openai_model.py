@@ -3,14 +3,17 @@ Use to get completions from an OpenAI completions endpoint. This version
 of the script only works with Azure OpenAI service, since OpenAI no longer
 hosts their code completion models.
 """
+import time
+import os
 from typing import List
 from multipl_e.completions import partial_arg_parser, make_main
 import json
 import openai
-import openai.error
-import os
-import time
-from typing import List
+from openai import OpenAI
+
+client = OpenAI(base_url=os.getenv("OPENAI_API_BASE"),
+                api_key=os.getenv("OPENAI_API_KEY"))
+# import openai.error
 
 global engine, model
 
@@ -31,20 +34,35 @@ def completions(
         if engine is not None:
             kwargs["engine"] = engine
         elif model is not None:
-            kwargs["model"] = model
+            if model == "deepseek_chat":
+                kwargs["model"] = "deepseek-chat"
+            elif model == "silconflow_deepseekv3":
+                kwargs["model"] = "Pro/deepseek-ai/DeepSeek-V3"
+            elif model == "silconflow_qwen2.5_coder:7b":
+                kwargs["model"] = "Qwen/Qwen2.5-Coder-7B-Instruct"
+            else:
+                # 把model里面的'_'替换为'-'
+                m = model.replace('_', '-')
+                kwargs["model"] = m
 
-        while True:
-            try:                
-                result = openai.Completion.create(**kwargs)
-                result = results["choices"][0]["text"]
+        failed_attempts = 5
+        while failed_attempts > 0:
+            try:
+                result = client.completions.create(**kwargs)
+                result = result.choices[0].text  # Access attributes directly
                 break
-            except openai.error.RateLimitError:
+            except openai.RateLimitError:
                 print("Rate limited...")
                 time.sleep(5)
+            except Exception as e:
+                print(f"Error: {e}")
+                failed_attempts -= 1
+        if failed_attempts == 0:
+            print("Failed to get completion after 5 attempts.")
+            result = ""  # Return an empty string or handle the error as needed.
         results.append(result)
-        time.sleep(0.5)
+        time.sleep(0.1)
     return results
-
 
 
 def main():
@@ -63,11 +81,6 @@ def main():
 
     engine = args.engine
     model = args.model
-    if args.azure:
-      openai.api_type = "azure"
-      openai.api_base = os.getenv("OPENAI_API_BASE")
-      openai.api_version = "2022-12-01"
-    openai.api_key = os.getenv("OPENAI_API_KEY")
     if args.name_override:
         name = args.name_override
     else:
